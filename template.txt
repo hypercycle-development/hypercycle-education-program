@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Launch node from a public AMI (wallet key only; no SSH by default)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Node settings" }
+        Parameters: [WalletPubKey, InstanceType, SubnetId]
+    ParameterLabels:
+      WalletPubKey: { default: "Wallet public key (Base address)" }
+      InstanceType: { default: "Instance type (free-tier friendly)" }
+      SubnetId: { default: "Subnet for the instance" }
+
+Parameters:
+  WalletPubKey:
+    Type: String
+    Description: Base wallet address for receiving payments (e.g., 0x...)
+    AllowedPattern: "^0x[a-fA-F0-9]{40}$"
+    ConstraintDescription: Must be a valid Ethereum address starting with 0x
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t2.micro]
+    Description: Default is t3.micro; pick t2.micro if t3.micro isn't offered.
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select a subnet in your VPC
+
+Mappings:
+  RegionMap:
+    us-west-2: { Ami: ami-REPLACE-USW2 }
+    eu-west-1: { Ami: ami-REPLACE-EUW1 }
+    ap-southeast-1: { Ami: ami-REPLACE-APSE1 }
+
+Resources:
+  NodeSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Egress-only (use SSM for admin)
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: ec2.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [ !Ref InstanceRole ]
+
+  NodeInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ami]
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds: [ !Ref NodeSG ]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeType: gp3, VolumeSize: 20, Encrypted: true, DeleteOnTermination: true }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+
+          # Create .env file with user's wallet address
+          cat > /home/admin/starter-example-nodes/education-directory/.env <<EOF
+          PAYMENT_WALLET_ADDRESS=${WalletPubKey}
+          EOF
+
+          # Set proper permissions
+          chown admin:admin /home/admin/starter-example-nodes/education-directory/.env
+          chmod 644 /home/admin/starter-example-nodes/education-directory/.env
+
+          # Restart docker compose to pick up the new .env
+          cd /home/admin/starter-example-nodes/education-directory
+          su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker-compose down && docker-compose up -d"
+
+          # Log completion
+          echo "Node configured with wallet: ${WalletPubKey}" >> /var/log/node-setup.log
+
+Outputs:
+  InstanceId:
+    Value: !Ref NodeInstance
+    Description: Launched instance ID
+
+  WalletAddress:
+    Value: !Ref WalletPubKey
+    Description: Configured payment wallet address
