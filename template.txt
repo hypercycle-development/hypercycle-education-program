@@ -30,9 +30,7 @@ Parameters:
 
 Mappings:
   RegionMap:
-    us-west-2: { Ami: ami-REPLACE-USW2 }
-    eu-west-1: { Ami: ami-REPLACE-EUW1 }
-    ap-southeast-1: { Ami: ami-REPLACE-APSE1 }
+    ca-central-1: { Ami: ami-0a57c2cc85b8810f8 }
 
 Resources:
   NodeSG:
