@@ -5,10 +5,11 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: { default: "Node settings" }
-        Parameters: [WalletPubKey, InstanceType]
+        Parameters: [WalletPubKey, InstanceType, SubnetId]
     ParameterLabels:
       WalletPubKey: { default: "Wallet public key (Base address)" }
       InstanceType: { default: "Instance type (free-tier friendly)" }
+      SubnetId: { default: "Public Subnet (must have internet gateway)" }
 
 Parameters:
   WalletPubKey:
@@ -23,6 +24,10 @@ Parameters:
     AllowedValues: [t3.micro, t2.micro]
     Description: Default is t3.micro; pick t2.micro if t3.micro isn't offered.
 
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Choose a PUBLIC subnet with internet gateway access
+
 Mappings:
   RegionMap:
     ca-central-1: { Ami: ami-0a57c2cc85b8810f8 }
@@ -31,8 +36,13 @@ Resources:
   NodeSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Node with ports 80 and 4000 open (use SSM for admin)
+      GroupDescription: Node with ports 22, 80 and 4000 open
       SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
@@ -64,7 +74,12 @@ Resources:
       ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ami]
       InstanceType: !Ref InstanceType
       IamInstanceProfile: !Ref InstanceProfile
-      SecurityGroupIds: [ !Ref NodeSG ]
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          SubnetId: !Ref SubnetId
+          GroupSet:
+            - !Ref NodeSG
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs: { VolumeType: gp3, VolumeSize: 20, Encrypted: true, DeleteOnTermination: true }
