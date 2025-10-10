@@ -43,10 +43,6 @@ Resources:
           ToPort: 4000
           CidrIp: 0.0.0.0/0
           Description: Node API access
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-          Description: Allow all outbound traffic for web requests
 
   InstanceRole:
     Type: AWS::IAM::Role
