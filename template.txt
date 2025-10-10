@@ -5,11 +5,10 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: { default: "Node settings" }
-        Parameters: [WalletPubKey, InstanceType, SubnetId]
+        Parameters: [WalletPubKey, InstanceType]
     ParameterLabels:
       WalletPubKey: { default: "Wallet public key (Base address)" }
       InstanceType: { default: "Instance type (free-tier friendly)" }
-      SubnetId: { default: "Subnet for the instance" }
 
 Parameters:
   WalletPubKey:
@@ -24,10 +23,6 @@ Parameters:
     AllowedValues: [t3.micro, t2.micro]
     Description: Default is t3.micro; pick t2.micro if t3.micro isn't offered.
 
-  SubnetId:
-    Type: AWS::EC2::Subnet::Id
-    Description: Select a subnet in your VPC
-
 Mappings:
   RegionMap:
     ca-central-1: { Ami: ami-0a57c2cc85b8810f8 }
@@ -36,10 +31,22 @@ Resources:
   NodeSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Egress-only (use SSM for admin)
+      GroupDescription: Node with ports 80 and 4000 open (use SSM for admin)
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+        - IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+          CidrIp: 0.0.0.0/0
+          Description: Node API access
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic for web requests
 
   InstanceRole:
     Type: AWS::IAM::Role
@@ -61,7 +68,6 @@ Resources:
       ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ami]
       InstanceType: !Ref InstanceType
       IamInstanceProfile: !Ref InstanceProfile
-      SubnetId: !Ref SubnetId
       SecurityGroupIds: [ !Ref NodeSG ]
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
