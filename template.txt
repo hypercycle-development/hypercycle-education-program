@@ -5,10 +5,11 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: { default: "Node settings" }
-        Parameters: [WalletPubKey, InstanceType, VpcId, SubnetId]
+        Parameters: [WalletPubKey, InstanceType, KeyName, VpcId, SubnetId]
     ParameterLabels:
       WalletPubKey: { default: "Wallet public key (Base address)" }
       InstanceType: { default: "Instance type (free-tier friendly)" }
+      KeyName: { default: "SSH Key Pair" }
       VpcId: { default: "VPC" }
       SubnetId: { default: "Public Subnet (must have internet gateway)" }
 
@@ -24,6 +25,10 @@ Parameters:
     Default: t3.micro
     AllowedValues: [t3.micro, t2.micro]
     Description: Default is t3.micro; pick t2.micro if t3.micro isn't offered.
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 Key Pair for SSH access
 
   VpcId:
     Type: AWS::EC2::VPC::Id
