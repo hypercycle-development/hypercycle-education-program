@@ -36,7 +36,7 @@ Parameters:
 
   SubnetId:
     Type: AWS::EC2::Subnet::Id
-    Description: Choose a PUBLIC subnet with internet gateway access
+    Description: Choose a PUBLIC subnet with internet gateway AND auto-assign public IP enabled
 
 Mappings:
   RegionMap:
@@ -84,13 +84,11 @@ Resources:
     Properties:
       ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ami]
       InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
       IamInstanceProfile: !Ref InstanceProfile
-      NetworkInterfaces:
-        - AssociatePublicIpAddress: true
-          DeviceIndex: 0
-          SubnetId: !Ref SubnetId
-          GroupSet:
-            - !Ref NodeSG
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref NodeSG
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs: { VolumeType: gp3, VolumeSize: 20, Encrypted: true, DeleteOnTermination: true }
@@ -98,6 +96,11 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           set -euo pipefail
+
+          # Create testing .env file with user's wallet address
+          cat > /home/admin/.env <<EOF
+          PAYMENT_WALLET_ADDRESS=${WalletPubKey}
+          EOF
 
           # Create .env file with user's wallet address
           cat > /home/admin/starter-example-nodes/education-directory/.env <<EOF
