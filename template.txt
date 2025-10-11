@@ -40,7 +40,7 @@ Parameters:
 
 Mappings:
   RegionMap:
-    ca-central-1: { Ami: ami-0a57c2cc85b8810f8 }
+    ca-central-1: { Ami: ami-09a5b194853e81258 }
 
 Resources:
   NodeSG:
@@ -96,11 +96,6 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           set -euo pipefail
-
-          # Create testing .env file with user's wallet address
-          cat > /home/admin/.env <<EOF
-          PAYMENT_WALLET_ADDRESS=${WalletPubKey}
-          EOF
 
           # Create .env file with user's wallet address
           cat > /home/admin/starter-example-nodes/education-directory/.env <<EOF
