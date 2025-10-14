@@ -1,20 +1,17 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Launch node from a public AMI (wallet key only; SSH optional; SSM enabled)
+Description: Launch node from a public AMI (wallet key only; no SSH by default)
 
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: { default: "Node settings" }
-        Parameters: [WalletPubKey, InstanceType]
-      - Label: { default: "Access & Network" }
-        Parameters: [EnableSSH, KeyName, VpcId, SubnetId]
+        Parameters: [WalletPubKey, InstanceType, KeyName, VpcId, SubnetId]
     ParameterLabels:
       WalletPubKey: { default: "Wallet public key (Base address)" }
       InstanceType: { default: "Instance type (free-tier friendly)" }
-      EnableSSH:    { default: "Enable SSH (port 22)?" }
-      KeyName:      { default: "SSH Key Pair (used only if SSH is enabled)" }
-      VpcId:        { default: "VPC" }
-      SubnetId:     { default: "Public Subnet (must have internet gateway)" }
+      KeyName: { default: "SSH Key Pair" }
+      VpcId: { default: "VPC" }
+      SubnetId: { default: "Public Subnet (must have internet gateway)" }
 
 Parameters:
   WalletPubKey:
@@ -29,15 +26,9 @@ Parameters:
     AllowedValues: [t3.micro, t2.micro]
     Description: Default is t3.micro; pick t2.micro if t3.micro isn't offered.
 
-  EnableSSH:
-    Type: String
-    AllowedValues: ['true','false']
-    Default: 'false'
-    Description: If 'true', open port 22 and attach the selected key pair.
-
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
-    Description: Existing EC2 Key Pair (dropdown). Only used when EnableSSH=true.
+    Description: EC2 Key Pair for SSH access
 
   VpcId:
     Type: AWS::EC2::VPC::Id
@@ -51,23 +42,18 @@ Mappings:
   RegionMap:
     ca-central-1: { Ami: ami-09a5b194853e81258 }
 
-Conditions:
-  SSHOn: !Equals [!Ref EnableSSH, 'true']
-
-Rules:
-  RequireKeyWhenSSHOn:
-    RuleCondition: !Equals [!Ref EnableSSH, 'true']
-    Assertions:
-      - Assert: !Not [!Equals [!Ref KeyName, ""]]
-        AssertDescription: When EnableSSH=true, you must select an EC2 Key Pair.
-
 Resources:
   NodeSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Node SG (HTTP/4000 open; SSH only if enabled)
+      GroupDescription: Node with ports 22, 80 and 4000 open
       VpcId: !Ref VpcId
       SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
@@ -79,27 +65,12 @@ Resources:
           CidrIp: 0.0.0.0/0
           Description: Node API access
 
-  # Make SSH ingress conditional so port 22 is only open when SSH is enabled
-  SshIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: SSHOn
-    Properties:
-      GroupId: !Ref NodeSG
-      IpProtocol: tcp
-      FromPort: 22
-      ToPort: 22
-      CidrIp: 0.0.0.0/0
-      Description: SSH access
-
   InstanceRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { Service: ec2.amazonaws.com }
-            Action: sts:AssumeRole
+        Statement: [{ Effect: Allow, Principal: { Service: ec2.amazonaws.com }, Action: sts:AssumeRole }]
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
@@ -113,8 +84,7 @@ Resources:
     Properties:
       ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ami]
       InstanceType: !Ref InstanceType
-      # Only set KeyName if SSH is enabled
-      KeyName: !If [SSHOn, !Ref KeyName, !Ref "AWS::NoValue"]
+      KeyName: !Ref KeyName
       IamInstanceProfile: !Ref InstanceProfile
       SubnetId: !Ref SubnetId
       SecurityGroupIds:
@@ -127,11 +97,7 @@ Resources:
           #!/bin/bash
           set -euo pipefail
 
-          # Ensure admin home exists (AMI-dependent; adjust if needed)
-          getent passwd admin >/dev/null 2>&1 || useradd -m -s /bin/bash admin || true
-
           # Create .env file with user's wallet address
-          install -d -o admin -g admin /home/admin/starter-example-nodes/education-directory
           cat > /home/admin/starter-example-nodes/education-directory/.env <<EOF
           PAYMENT_WALLET_ADDRESS=${WalletPubKey}
           EOF
@@ -141,12 +107,8 @@ Resources:
           chmod 644 /home/admin/starter-example-nodes/education-directory/.env
 
           # Restart docker compose to pick up the new .env
-          cd /home/admin/starter-example-nodes/education-directory || exit 0
-          if command -v docker-compose >/dev/null 2>&1; then
-            su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker-compose down || true && docker-compose up -d || true"
-          elif command -v docker >/dev/null 2>&1; then
-            su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker compose down || true && docker compose up -d || true"
-          fi
+          cd /home/admin/starter-example-nodes/education-directory
+          su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker-compose down && docker-compose up -d"
 
           # Log completion
           echo "Node configured with wallet: ${WalletPubKey}" >> /var/log/node-setup.log
@@ -159,7 +121,3 @@ Outputs:
   WalletAddress:
     Value: !Ref WalletPubKey
     Description: Configured payment wallet address
-
-  SshEnabled:
-    Value: !If [SSHOn, 'true', 'false']
-    Description: Whether SSH (port 22) was enabled for this deployment
