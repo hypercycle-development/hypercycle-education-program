@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Launch node from a public AMI (wallet key only; SSM enabled; NO SSH)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Node settings" }
+        Parameters: [WalletPubKey, InstanceType]
+      - Label: { default: "Network" }
+        Parameters: [VpcId, SubnetId]
+    ParameterLabels:
+      WalletPubKey: { default: "Wallet public key (Base address)" }
+      InstanceType: { default: "Instance type (free-tier friendly)" }
+      VpcId:        { default: "VPC" }
+      SubnetId:     { default: "Public Subnet (must have internet gateway)" }
+
+Parameters:
+  WalletPubKey:
+    Type: String
+    Description: Base wallet address for receiving payments (e.g., 0x...)
+    AllowedPattern: "^0x[a-fA-F0-9]{40}$"
+    ConstraintDescription: Must be a valid Ethereum address starting with 0x
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t2.micro]
+    Description: Default is t3.micro; pick t2.micro if t3.micro isn't offered.
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select your VPC
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Choose a PUBLIC subnet with internet gateway AND auto-assign public IP enabled
+
+Mappings:
+  RegionMap:
+    ca-central-1: { Ami: ami-09a5b194853e81258 }
+
+Resources:
+  NodeSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Node SG (HTTP/4000 open; NO SSH)
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+        - IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+          CidrIp: 0.0.0.0/0
+          Description: Node API access
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [ !Ref InstanceRole ]
+
+  NodeInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ami]
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds: [ !Ref NodeSG ]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeType: gp3, VolumeSize: 20, Encrypted: true, DeleteOnTermination: true }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+
+          # Ensure admin user exists (AMI-dependent)
+          getent passwd admin >/dev/null 2>&1 || useradd -m -s /bin/bash admin || true
+
+          # Create .env with wallet address
+          install -d -o admin -g admin /home/admin/starter-example-nodes/education-directory
+          cat > /home/admin/starter-example-nodes/education-directory/.env <<EOF
+          PAYMENT_WALLET_ADDRESS=${WalletPubKey}
+          EOF
+          chown admin:admin /home/admin/starter-example-nodes/education-directory/.env
+          chmod 644 /home/admin/starter-example-nodes/education-directory/.env
+
+          # Restart docker compose to pick up .env
+          cd /home/admin/starter-example-nodes/education-directory || exit 0
+          if command -v docker-compose >/dev/null 2>&1; then
+            su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker-compose down || true && docker-compose up -d || true"
+          elif command -v docker >/dev/null 2>&1; then
+            su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker compose down || true && docker compose up -d || true"
+          fi
+
+          echo "Node configured (no SSH). Wallet: ${WalletPubKey}" >> /var/log/node-setup.log
+
+Outputs:
+  InstanceId:
+    Value: !Ref NodeInstance
+    Description: Launched instance ID
+
+  WalletAddress:
+    Value: !Ref WalletPubKey
+    Description: Configured payment wallet address
