@@ -43,6 +43,13 @@ Mappings:
     ca-central-1: { Ami: ami-09a5b194853e81258 }
 
 Resources:
+  RequestAMIAccess:
+    Type: Custom::RequestAccess
+    Properties:
+      ServiceToken: arn:aws:lambda:ca-central-1:152547424026:function:GrantAMIAccess
+      RequestingAccountId: !Ref AWS::AccountId
+      AmiId: !FindInMap [RegionMap, !Ref "AWS::Region", Ami]
+
   NodeSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -81,6 +88,7 @@ Resources:
 
   NodeInstance:
     Type: AWS::EC2::Instance
+    DependsOn: RequestAMIAccess
     Properties:
       ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", Ami]
       InstanceType: !Ref InstanceType
