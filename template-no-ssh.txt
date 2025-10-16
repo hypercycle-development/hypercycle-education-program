@@ -37,7 +37,7 @@ Parameters:
 
 Mappings:
   RegionMap:
-    ca-central-1: { Ami: ami-09a5b194853e81258 }
+    ca-central-1: { Ami: ami-094018c9de13880e2 }
 
 Resources:
   RequestAMIAccess:
