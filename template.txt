@@ -116,7 +116,7 @@ Resources:
 
           # Restart docker compose to pick up the new .env
           cd /home/admin/starter-example-nodes/education-directory
-          su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker-compose down && docker-compose up -d"
+          su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker compose pull && docker compose down && docker compose up -d"
 
           # Log completion
           echo "Node configured with wallet: ${WalletPubKey}" >> /var/log/node-setup.log

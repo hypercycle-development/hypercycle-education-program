@@ -111,11 +111,9 @@ Resources:
 
           # Restart docker compose to pick up .env
           cd /home/admin/starter-example-nodes/education-directory || exit 0
-          if command -v docker-compose >/dev/null 2>&1; then
-            su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker-compose down || true && docker-compose up -d || true"
-          elif command -v docker >/dev/null 2>&1; then
-            su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker compose down || true && docker compose up -d || true"
-          fi
+          # Restart docker compose to pick up the new .env
+          cd /home/admin/starter-example-nodes/education-directory
+          su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker compose pull && docker compose down && docker compose up -d"
 
           echo "Node configured (no SSH). Wallet: ${WalletPubKey}" >> /var/log/node-setup.log
 
