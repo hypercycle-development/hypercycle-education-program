@@ -106,27 +106,138 @@ Resources:
           Ebs: { VolumeType: gp3, VolumeSize: 20, Encrypted: true, DeleteOnTermination: true }
       UserData:
         Fn::Base64: !Sub |
-          #!/bin/bash
-          set -euo pipefail
+          #cloud-config
+          users:
+            - name: admin
+              system: false
+              shell: /bin/bash
+              home: /home/admin
 
-          # Ensure admin user exists (AMI-dependent)
-          getent passwd admin >/dev/null 2>&1 || useradd -m -s /bin/bash admin || true
+          write_files:
+            - path: /home/admin/starter-example-nodes/education-directory/.env
+              owner: admin:admin
+              permissions: '0644'
+              content: |
+                PAYMENT_WALLET_ADDRESS=${WalletPubKey}
 
-          # Create .env with wallet address
-          install -d -o admin -g admin /home/admin/starter-example-nodes/education-directory
-          cat > /home/admin/starter-example-nodes/education-directory/.env <<EOF
-          PAYMENT_WALLET_ADDRESS=${WalletPubKey}
-          EOF
-          chown admin:admin /home/admin/starter-example-nodes/education-directory/.env
-          chmod 644 /home/admin/starter-example-nodes/education-directory/.env
+            - path: /home/admin/restart-node.sh
+              owner: admin:admin
+              permissions: '0755'
+              content: |
+                #!/bin/bash
+                set -euo pipefail
 
-          # Restart docker compose to pick up .env
-          cd /home/admin/starter-example-nodes/education-directory || exit 0
-          # Restart docker compose to pick up the new .env
-          cd /home/admin/starter-example-nodes/education-directory
-          su - admin -c "cd /home/admin/starter-example-nodes/education-directory && docker compose pull && docker compose down && docker compose up -d"
+                # Function to log with timestamp
+                log() {
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a /var/log/node-restart.log
+                }
 
-          echo "Node configured (SSH enabled). Wallet: ${WalletPubKey}" >> /var/log/node-setup.log
+                log "Starting node restart process..."
+
+                # Wait for Docker daemon to be ready
+                log "Waiting for Docker daemon..."
+                timeout 300 bash -c 'until docker info > /dev/null 2>&1; do sleep 2; done' || {
+                    log "ERROR: Docker daemon not ready after 5 minutes"
+                    exit 1
+                }
+                log "Docker daemon is ready"
+
+                # Ensure the directory exists
+                if [[ ! -d "/home/admin/starter-example-nodes/education-directory" ]]; then
+                    log "ERROR: Expected directory does not exist"
+                    exit 1
+                fi
+
+                # Change to the working directory
+                cd /home/admin/starter-example-nodes/education-directory
+
+                # Function to run docker compose commands as admin user
+                run_as_admin() {
+                    sudo -u admin -g admin bash -c "cd /home/admin/starter-example-nodes/education-directory && $1"
+                }
+
+                # Pull latest images
+                log "Pulling latest Docker images..."
+                if ! run_as_admin "docker compose pull"; then
+                    log "ERROR: Failed to pull Docker images"
+                    exit 1
+                fi
+
+                # Stop existing containers
+                log "Stopping existing containers..."
+                run_as_admin "docker compose down" || log "No existing containers to stop"
+
+                # Wait a moment for cleanup
+                sleep 5
+
+                # Start containers
+                log "Starting containers..."
+                if ! run_as_admin "docker compose up -d"; then
+                    log "ERROR: Failed to start containers"
+                    exit 1
+                fi
+
+                # Wait for services to be ready
+                log "Waiting for services to start..."
+                sleep 15
+
+                # Verify containers are running
+                if ! run_as_admin "docker compose ps --services --filter status=running" | grep -q .; then
+                    log "ERROR: No containers are running after startup"
+                    run_as_admin "docker compose logs" || true
+                    exit 1
+                fi
+
+                # Verify the node is working using the health endpoint
+                log "Verifying node health and payment configuration..."
+                for attempt in {1..30}; do
+                    if response=$(curl -s http://localhost:4000/api/info 2>/dev/null); then
+                        if echo "$response" | jq -e '.brain.payment' > /dev/null 2>&1; then
+                            log "SUCCESS: Node is healthy and payment is configured"
+                            log "Payment address: $(echo "$response" | jq -r '.brain.payment // "unknown"')"
+                            log "Node restart completed successfully"
+                            exit 0
+                        else
+                            log "Attempt $attempt: Node running but payment not configured yet"
+                        fi
+                    else
+                        log "Attempt $attempt: Node not responding to health check"
+                    fi
+
+                    if [ $attempt -eq 30 ]; then
+                        log "ERROR: Node failed to configure payment after 30 attempts (5 minutes)"
+                        log "Final containers status:"
+                        run_as_admin "docker compose ps" || true
+                        log "Final container logs:"
+                        run_as_admin "docker compose logs --tail=50" || true
+                        exit 1
+                    fi
+
+                    sleep 10
+                done
+
+            - path: /etc/systemd/system/node-restart.service
+              permissions: '0644'
+              content: |
+                [Unit]
+                Description=Restart node with new configuration
+                After=network-online.target docker.service
+                Wants=network-online.target
+
+                [Service]
+                Type=oneshot
+                ExecStart=/home/admin/restart-node.sh
+                User=root
+                StandardOutput=journal
+                StandardError=journal
+
+                [Install]
+                WantedBy=multi-user.target
+
+          runcmd:
+            - systemctl daemon-reload
+            - systemctl enable node-restart.service
+            - systemctl start node-restart.service
 
 Outputs:
   InstanceId:
@@ -136,3 +247,19 @@ Outputs:
   WalletAddress:
     Value: !Ref WalletPubKey
     Description: Configured payment wallet address
+
+  HealthCheckURL:
+    Value: !Sub "http://${NodeInstance.PublicIp}:4000/api/health"
+    Description: Node health check endpoint
+
+  InfoURL:
+    Value: !Sub "http://${NodeInstance.PublicIp}:4000/api/info"
+    Description: Node info endpoint (verify payment configuration)
+
+  SSHConnection:
+    Value: !Sub "ssh admin@${NodeInstance.PublicIp}"
+    Description: SSH connection command
+
+  SSMSessionCommand:
+    Value: !Sub "aws ssm start-session --target ${NodeInstance}"
+    Description: Alternative access via SSM Session Manager
