@@ -224,6 +224,11 @@ Resources:
                 WantedBy=multi-user.target
 
           runcmd:
+            # Clear any pre-existing SSH keys and let EC2 manage them
+            - rm -f /home/admin/.ssh/authorized_keys
+            - rm -f /home/ec2-user/.ssh/authorized_keys 2>/dev/null || true
+            - rm -f /root/.ssh/authorized_keys 2>/dev/null || true
+
             - systemctl daemon-reload
             - systemctl enable node-restart.service
             - systemctl start node-restart.service
