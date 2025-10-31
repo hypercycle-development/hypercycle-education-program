@@ -101,143 +101,138 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile
       SubnetId: !Ref SubnetId
       SecurityGroupIds: [ !Ref NodeSG ]
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs: { VolumeType: gp3, VolumeSize: 20, Encrypted: true, DeleteOnTermination: true }
       UserData:
-        Fn::Base64: !Sub |
-          #cloud-config
-          users:
-            - name: admin
-              system: false
-              shell: /bin/bash
-              home: /home/admin
+        Fn::Base64:
+          Fn::Sub: |
+            #cloud-config
+            users:
+              - name: admin
+                system: false
+                shell: /bin/bash
+                home: /home/admin
+                sudo: ["ALL=(ALL) NOPASSWD:ALL"]
 
-          write_files:
-            - path: /home/admin/starter-example-nodes/education-directory/.env
-              owner: admin:admin
-              permissions: '0644'
-              content: |
-                PAYMENT_WALLET_ADDRESS=${WalletPubKey}
+            write_files:
+              - path: /home/admin/starter-example-nodes/education-directory/.env
+                owner: admin:admin
+                permissions: '0644'
+                content: |
+                  PAYMENT_WALLET_ADDRESS=${WalletPubKey}
 
-            - path: /home/admin/restart-node.sh
-              owner: admin:admin
-              permissions: '0755'
-              content: |
-                #!/bin/bash
-                set -euo pipefail
-
-                # Function to log with timestamp
-                log() {
-                    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a /var/log/node-restart.log
-                }
-
-                log "Starting node restart process..."
-
-                # Wait for Docker daemon to be ready
-                log "Waiting for Docker daemon..."
-                timeout 300 bash -c 'until docker info > /dev/null 2>&1; do sleep 2; done' || {
-                    log "ERROR: Docker daemon not ready after 5 minutes"
-                    exit 1
-                }
-                log "Docker daemon is ready"
-
-                # Ensure the directory exists
-                if [[ ! -d "/home/admin/starter-example-nodes/education-directory" ]]; then
-                    log "ERROR: Expected directory does not exist"
-                    exit 1
-                fi
-
-                # Change to the working directory
-                cd /home/admin/starter-example-nodes/education-directory
-
-                # Function to run docker compose commands as admin user
-                run_as_admin() {
-                    sudo -u admin -g admin bash -c "cd /home/admin/starter-example-nodes/education-directory && $1"
-                }
-
-                # Pull latest images
-                log "Pulling latest Docker images..."
-                if ! run_as_admin "docker compose pull"; then
-                    log "ERROR: Failed to pull Docker images"
-                    exit 1
-                fi
-
-                # Stop existing containers
-                log "Stopping existing containers..."
-                run_as_admin "docker compose down" || log "No existing containers to stop"
-
-                # Wait a moment for cleanup
-                sleep 5
-
-                # Start containers
-                log "Starting containers..."
-                if ! run_as_admin "docker compose up -d"; then
-                    log "ERROR: Failed to start containers"
-                    exit 1
-                fi
-
-                # Wait for services to be ready
-                log "Waiting for services to start..."
-                sleep 15
-
-                # Verify containers are running
-                if ! run_as_admin "docker compose ps --services --filter status=running" | grep -q .; then
-                    log "ERROR: No containers are running after startup"
-                    run_as_admin "docker compose logs" || true
-                    exit 1
-                fi
-
-                # Verify the node is working using the health endpoint
-                log "Verifying node health and payment configuration..."
-                for attempt in {1..30}; do
+              - path: /home/admin/restart-node.sh
+                owner: admin:admin
+                permissions: '0755'
+                content: |
+                  #!/bin/bash
+                  set -euo pipefail
+                  log() { echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a /var/log/node-restart.log; }
+                  log "Starting node restart process..."
+                  log "Waiting for Docker daemon..."
+                  timeout 300 bash -c 'until docker info > /dev/null 2>&1; do sleep 2; done' || { log "ERROR: Docker daemon not ready after 5 minutes"; exit 1; }
+                  log "Docker daemon is ready"
+                  if [[ ! -d "/home/admin/starter-example-nodes/education-directory" ]]; then log "ERROR: Expected directory does not exist"; exit 1; fi
+                  cd /home/admin/starter-example-nodes/education-directory
+                  run_as_admin() { sudo -u admin -g admin bash -c "cd /home/admin/starter-example-nodes/education-directory && $1"; }
+                  log "Pulling latest Docker images..."; if ! run_as_admin "docker compose pull"; then log "ERROR: Failed to pull Docker images"; exit 1; fi
+                  log "Stopping existing containers..."; run_as_admin "docker compose down" || log "No existing containers to stop"
+                  sleep 5
+                  log "Starting containers..."; if ! run_as_admin "docker compose up -d"; then log "ERROR: Failed to start containers"; exit 1; fi
+                  log "Waiting for services to start..."; sleep 15
+                  if ! run_as_admin "docker compose ps --services --filter status=running" | grep -q .; then log "ERROR: No containers are running after startup"; run_as_admin "docker compose logs" || true; exit 1; fi
+                  log "Verifying node health and payment configuration..."
+                  for attempt in {1..30}; do
                     if response=$(curl -s http://localhost:4000/api/info 2>/dev/null); then
-                        if echo "$response" | jq -e '.brain.payment' > /dev/null 2>&1; then
-                            log "SUCCESS: Node is healthy and payment is configured"
-                            log "Payment address: $(echo "$response" | jq -r '.brain.payment // "unknown"')"
-                            log "Node restart completed successfully"
-                            exit 0
-                        else
-                            log "Attempt $attempt: Node running but payment not configured yet"
-                        fi
+                      if echo "$response" | jq -e '.brain.payment' > /dev/null 2>&1; then
+                        log "SUCCESS: Node is healthy and payment is configured"
+                        log "Payment address: $(echo "$response" | jq -r '.brain.payment // "unknown"')"
+                        log "Node restart completed successfully"; exit 0
+                      else
+                        log "Attempt $attempt: Node running but payment not configured yet"
+                      fi
                     else
-                        log "Attempt $attempt: Node not responding to health check"
+                      log "Attempt $attempt: Node not responding to health check"
                     fi
-
                     if [ $attempt -eq 30 ]; then
-                        log "ERROR: Node failed to configure payment after 30 attempts (5 minutes)"
-                        log "Final containers status:"
-                        run_as_admin "docker compose ps" || true
-                        log "Final container logs:"
-                        run_as_admin "docker compose logs --tail=50" || true
-                        exit 1
+                      log "ERROR: Node failed to configure payment after 30 attempts (5 minutes)"
+                      log "Final containers status:"; run_as_admin "docker compose ps" || true
+                      log "Final container logs:"; run_as_admin "docker compose logs --tail=50" || true
+                      exit 1
                     fi
-
                     sleep 10
-                done
+                  done
 
-            - path: /etc/systemd/system/node-restart.service
-              permissions: '0644'
-              content: |
-                [Unit]
-                Description=Restart node with new configuration
-                After=network-online.target docker.service
-                Wants=network-online.target
+              - path: /etc/systemd/system/node-restart.service
+                permissions: '0644'
+                content: |
+                  [Unit]
+                  Description=Restart node with new configuration
+                  After=network-online.target docker.service
+                  Wants=network-online.target
 
-                [Service]
-                Type=oneshot
-                ExecStart=/home/admin/restart-node.sh
-                User=root
-                StandardOutput=journal
-                StandardError=journal
+                  [Service]
+                  Type=oneshot
+                  ExecStart=/home/admin/restart-node.sh
+                  User=root
+                  StandardOutput=journal
+                  StandardError=journal
 
-                [Install]
-                WantedBy=multi-user.target
+                  [Install]
+                  WantedBy=multi-user.target
 
-          runcmd:
-            - systemctl daemon-reload
-            - systemctl enable node-restart.service
-            - systemctl start node-restart.service
+            runcmd:
+              # ensure admin home and .ssh directories exist
+              - mkdir -p /home/admin/.ssh
+              - chmod 700 /home/admin/.ssh
+              - chown -R admin:admin /home/admin
+
+              # add admin to common admin groups cross-distro
+              - 'usermod -aG wheel admin || true'
+              - 'usermod -aG sudo admin || true'
+              - 'usermod -aG docker admin || true'
+
+              # Configure SSH key for admin user
+              - |
+                set -euo pipefail
+                echo "Setting up SSH key for admin user..."
+
+                # Clear any existing keys first
+                # > /home/admin/.ssh/authorized_keys
+
+                # Try to get public key using IMDSv2 first, fall back to IMDSv1
+                META="http://169.254.169.254/latest"
+
+                # Try IMDSv2 (session token)
+                TOKEN=$(curl -s -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' "$META/api/token" 2>/dev/null || echo "")
+                if [ -n "$TOKEN" ]; then
+                  echo "Using IMDSv2..."
+                  PUBLIC_KEY=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" "$META/meta-data/public-keys/0/openssh-key" 2>/dev/null || echo "")
+                else
+                  echo "IMDSv1 fallback..."
+                  PUBLIC_KEY=$(curl -s "$META/meta-data/public-keys/0/openssh-key" 2>/dev/null || echo "")
+                fi
+
+                if [ -n "$PUBLIC_KEY" ]; then
+                  echo "$PUBLIC_KEY" >> /home/admin/.ssh/authorized_keys
+                  chmod 600 /home/admin/.ssh/authorized_keys
+                  chown admin:admin /home/admin/.ssh/authorized_keys
+                  echo "SUCCESS: SSH key configured for admin user"
+                  echo "Key fingerprint: $(ssh-keygen -lf /home/admin/.ssh/authorized_keys 2>/dev/null || echo 'unable to get fingerprint')"
+                else
+                  echo "ERROR: Could not retrieve public key from EC2 metadata service"
+                  exit 1
+                fi
+
+              # Start service
+              - systemctl daemon-reload
+              - systemctl enable node-restart.service
+              - systemctl start node-restart.service
 
 Outputs:
   InstanceId:
