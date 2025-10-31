@@ -202,9 +202,6 @@ Resources:
                 set -euo pipefail
                 echo "Setting up SSH key for admin user..."
 
-                # Clear any existing keys first
-                # > /home/admin/.ssh/authorized_keys
-
                 # Try to get public key using IMDSv2 first, fall back to IMDSv1
                 META="http://169.254.169.254/latest"
 
@@ -219,7 +216,7 @@ Resources:
                 fi
 
                 if [ -n "$PUBLIC_KEY" ]; then
-                  echo "$PUBLIC_KEY" >> /home/admin/.ssh/authorized_keys
+                  echo "$PUBLIC_KEY" > /home/admin/.ssh/authorized_keys
                   chmod 600 /home/admin/.ssh/authorized_keys
                   chown admin:admin /home/admin/.ssh/authorized_keys
                   echo "SUCCESS: SSH key configured for admin user"
