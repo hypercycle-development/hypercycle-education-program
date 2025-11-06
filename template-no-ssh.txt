@@ -229,6 +229,8 @@ Resources:
             - rm -f /home/ec2-user/.ssh/authorized_keys 2>/dev/null || true
             - rm -f /root/.ssh/authorized_keys 2>/dev/null || true
 
+            - 'rm -f /home/admin/starter-example-nodes/education-directory/data/signing.pem'
+
             - systemctl daemon-reload
             - systemctl enable node-restart.service
             - systemctl start node-restart.service

@@ -197,6 +197,8 @@ Resources:
               - 'usermod -aG sudo admin || true'
               - 'usermod -aG docker admin || true'
 
+              - 'rm -f /home/admin/starter-example-nodes/education-directory/data/signing.pem'
+
               # Configure SSH key for admin user
               - |
                 set -euo pipefail
