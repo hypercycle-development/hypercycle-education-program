@@ -5,11 +5,12 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: { default: "Node settings" }
-        Parameters: [WalletPubKey, InstanceType]
+        Parameters: [WalletPubKey, BaseRpcUrl, InstanceType]
       - Label: { default: "Network" }
         Parameters: [VpcId, SubnetId]
     ParameterLabels:
       WalletPubKey: { default: "Wallet public key (Base address)" }
+      BaseRpcUrl: { default: "Base RPC URL" }
       InstanceType: { default: "Instance type (free-tier friendly)" }
       VpcId:        { default: "VPC" }
       SubnetId:     { default: "Public Subnet (must have internet gateway)" }
@@ -20,6 +21,12 @@ Parameters:
     Description: Base wallet address for receiving payments (e.g., 0x...)
     AllowedPattern: "^0x[a-fA-F0-9]{40}$"
     ConstraintDescription: Must be a valid Ethereum address starting with 0x
+
+  BaseRpcUrl:
+    Type: String
+    Description: Base RPC URL for blockchain connectivity (e.g., https://mainnet.base.org)
+    AllowedPattern: "^https?://.*"
+    ConstraintDescription: Must be a valid HTTP or HTTPS URL
 
   InstanceType:
     Type: String
@@ -108,6 +115,7 @@ Resources:
               permissions: '0644'
               content: |
                 PAYMENT_WALLET_ADDRESS=${WalletPubKey}
+                BASE_RPC_URL=${BaseRpcUrl}
 
             - path: /home/admin/restart-node.sh
               owner: admin:admin
@@ -243,6 +251,10 @@ Outputs:
   WalletAddress:
     Value: !Ref WalletPubKey
     Description: Configured payment wallet address
+
+  BaseRpcUrl:
+    Value: !Ref BaseRpcUrl
+    Description: Configured Base RPC URL
 
   HealthCheckURL:
     Value: !Sub "http://${NodeInstance.PublicIp}:4000/api/health"
