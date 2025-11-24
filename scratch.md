@@ -5,3 +5,4 @@
 [NO SSH](https://ca-central-1.console.aws.amazon.com/cloudformation/home?region=ca-central-1#/stacks/quickcreate?templateURL=https://s3.us-east-2.amazonaws.com/education-node-manager.hyperpg.site/template-no-ssh.txt&stackName=education-node)
 
 Example Wallet: 0x1234567890123456789012345678901234567890
+Example RPC URL: https://base-mainnet.infura.io/v3/667e70c93c1742ff97ebbeb9ae742367
